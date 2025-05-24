@@ -10,4 +10,7 @@ func main() {
 
 	// Run file encryption demonstration
 	poc.RunFileEncryptionDemo()
+
+	// Run MLS group chat demonstration
+	poc.RunMLSDemo()
 }

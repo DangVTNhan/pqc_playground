@@ -1,5 +1,22 @@
+# git.schwanenlied.me/yawning/x448.git v0.0.0-20170617130356-01b048fb03d6
+## explicit
+git.schwanenlied.me/yawning/x448.git
+# github.com/cisco/go-hpke v0.0.0-20200603153819-0a6c8374cd9a
+## explicit
+github.com/cisco/go-hpke
+# github.com/cisco/go-mls v0.0.0-20210331162924-158a3829b839
+## explicit; go 1.14
+github.com/cisco/go-mls
+# github.com/cisco/go-tls-syntax v0.0.0-20200615170901-cc95af012391
+## explicit
+github.com/cisco/go-tls-syntax
 # github.com/cloudflare/circl v1.6.1
 ## explicit; go 1.22.0
+github.com/cloudflare/circl/dh/sidh
+github.com/cloudflare/circl/dh/sidh/internal/common
+github.com/cloudflare/circl/dh/sidh/internal/p434
+github.com/cloudflare/circl/dh/sidh/internal/p503
+github.com/cloudflare/circl/dh/sidh/internal/p751
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
 github.com/cloudflare/circl/ecc/goldilocks
@@ -54,13 +71,15 @@ github.com/cloudflare/circl/xof
 github.com/cloudflare/circl/xof/k12
 # golang.org/x/crypto v0.11.1-0.20230711161743-2e82bdd1719d
 ## explicit; go 1.17
-golang.org/x/crypto/argon2
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
 golang.org/x/crypto/chacha20
 golang.org/x/crypto/chacha20poly1305
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1
+golang.org/x/crypto/curve25519
+golang.org/x/crypto/curve25519/internal/field
+golang.org/x/crypto/ed25519
 golang.org/x/crypto/hkdf
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
