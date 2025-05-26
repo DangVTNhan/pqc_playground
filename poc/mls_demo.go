@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/cisco/go-mls"
+	"silvertiger.com/go/client/go-mls"
 )
 
 // MLSParticipant represents a participant in the MLS group chat
@@ -76,8 +76,8 @@ func NewMLSParticipant(name string, suite mls.CipherSuite) (*MLSParticipant, err
 
 // NewMLSGroupChat creates a new MLS group chat
 func NewMLSGroupChat() *MLSGroupChat {
-	groupID := []byte{0x01, 0x02, 0x03, 0x04}        // Simple group ID for demo
-	suite := mls.X25519_AES128GCM_SHA256_Ed25519      // Use X25519 + Ed25519 cipher suite (more stable)
+	groupID := []byte{0x01, 0x02, 0x03, 0x04}    // Simple group ID for demo
+	suite := mls.X25519_AES128GCM_SHA256_Ed25519 // Use X25519 + Ed25519 cipher suite (more stable)
 
 	return &MLSGroupChat{
 		GroupID:      groupID,

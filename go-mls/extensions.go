@@ -117,7 +117,7 @@ func (lte LifetimeExtension) Type() ExtensionType {
 //////////
 
 type ParentHashExtension struct {
-	ParentHash []byte `tls:"head=1"`
+	ParentHash []byte `tls:"head=2"`
 }
 
 func (phe ParentHashExtension) Type() ExtensionType {

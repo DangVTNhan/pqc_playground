@@ -2,6 +2,7 @@ package mls
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"reflect"
 
@@ -22,7 +23,7 @@ const (
 type ParentNode struct {
 	PublicKey      HPKEPublicKey
 	UnmergedLeaves []LeafIndex `tls:"head=4"`
-	ParentHash     []byte      `tls:"head=1"`
+	ParentHash     []byte      `tls:"head=2"`
 }
 
 func (n *ParentNode) Equals(other *ParentNode) bool {
@@ -51,9 +52,9 @@ func (n *ParentNode) AddUnmerged(l LeafIndex) {
 	n.UnmergedLeaves = append(n.UnmergedLeaves, l)
 }
 
-///
-/// Node
-///
+// /
+// / Node
+// /
 type Node struct {
 	Leaf   *KeyPackage
 	Parent *ParentNode
@@ -164,9 +165,9 @@ func (n *Node) UnmarshalTLS(data []byte) (int, error) {
 	return s.Position(), nil
 }
 
-///
-/// OptionalNode
-///
+// /
+// / OptionalNode
+// /
 type OptionalNode struct {
 	Node *Node  `tls:"optional"`
 	Hash []byte `tls:"omit"`
@@ -235,8 +236,8 @@ func (n *OptionalNode) SetLeafNodeHash(suite CipherSuite, index LeafIndex) error
 type ParentNodeHashInput struct {
 	NodeIndex  NodeIndex
 	ParentNode *ParentNode `tls:"optional"`
-	LeftHash   []byte      `tls:"head=1"`
-	RightHash  []byte      `tls:"head=1"`
+	LeftHash   []byte      `tls:"head=2"`
+	RightHash  []byte      `tls:"head=2"`
 }
 
 func (n *OptionalNode) SetParentNodeHash(suite CipherSuite, index NodeIndex, left, right []byte) error {
@@ -258,9 +259,9 @@ func (n *OptionalNode) SetParentNodeHash(suite CipherSuite, index NodeIndex, lef
 	return n.setNodeHash(suite, input)
 }
 
-///
-/// DirectPath
-///
+// /
+// / DirectPath
+// /
 type DirectPathNode struct {
 	PublicKey            HPKEPublicKey
 	EncryptedPathSecrets []HPKECiphertext `tls:"head=4"`
@@ -361,7 +362,7 @@ func (path *DirectPath) Sign(suite CipherSuite, initPub HPKEPublicKey, sigPriv S
 type TreeKEMPrivateKey struct {
 	Suite           CipherSuite
 	Index           LeafIndex
-	UpdateSecret    []byte                       `tls:"head=1"`
+	UpdateSecret    []byte                       `tls:"head=2"`
 	PathSecrets     map[NodeIndex]Bytes1         `tls:"head=4"`
 	privateKeyCache map[NodeIndex]HPKEPrivateKey `tls:"omit"`
 }
@@ -422,7 +423,7 @@ func (priv TreeKEMPrivateKey) privateKey(n NodeIndex) (HPKEPrivateKey, error) {
 		return HPKEPrivateKey{}, fmt.Errorf("Private key not found")
 	}
 
-	key, err := priv.Suite.hpke().Derive(secret)
+	key, err := priv.Suite.Hpke().Derive(secret)
 	if err != nil {
 		return HPKEPrivateKey{}, err
 	}
@@ -442,6 +443,26 @@ func (priv *TreeKEMPrivateKey) SetLeafSecret(secret []byte) {
 	ni := toNodeIndex(priv.Index)
 	priv.PathSecrets[ni] = dup(secret)
 	delete(priv.privateKeyCache, ni)
+}
+
+// RotateKeys performs key rotation for the TreeKEM private key
+// This generates new path secrets and updates the key material
+func (priv *TreeKEMPrivateKey) RotateKeys(size LeafCount) error {
+	// Generate new leaf secret for key rotation
+	newLeafSecret := make([]byte, priv.Suite.Constants().SecretSize)
+	_, err := rand.Read(newLeafSecret)
+	if err != nil {
+		return fmt.Errorf("failed to generate new leaf secret: %v", err)
+	}
+
+	// Clear old path secrets and private key cache
+	priv.PathSecrets = map[NodeIndex]Bytes1{}
+	priv.privateKeyCache = map[NodeIndex]HPKEPrivateKey{}
+
+	// Set new path secrets starting from the leaf
+	priv.setPathSecrets(toNodeIndex(priv.Index), size, newLeafSecret)
+
+	return nil
 }
 
 // TODO(RLB) Onece the spec is updated to have EncryptedPathSecrets as a map,
@@ -486,7 +507,7 @@ func (priv *TreeKEMPrivateKey) Decap(from LeafIndex, pub TreeKEMPublicKey, conte
 				return err
 			}
 
-			pathSecret, err = priv.Suite.hpke().Decrypt(nodePriv, context, ct)
+			pathSecret, err = priv.Suite.Hpke().Decrypt(nodePriv, context, ct)
 			if err != nil {
 				return err
 			}
@@ -655,6 +676,47 @@ func (pub *TreeKEMPublicKey) BlankPath(index LeafIndex) {
 	}
 }
 
+// RotateLeafKey performs key rotation for a specific leaf in the tree
+// This generates a new key package and updates the tree structure
+func (pub *TreeKEMPublicKey) RotateLeafKey(index LeafIndex, suite CipherSuite, sigPriv SignaturePrivateKey) (*KeyPackage, error) {
+	if index >= LeafIndex(pub.Size()) {
+		return nil, fmt.Errorf("leaf index %d out of bounds (size: %d)", index, pub.Size())
+	}
+
+	// Generate new HPKE key pair for the leaf
+	hpkeInstance := suite.Hpke()
+	newHPKEKey, err := hpkeInstance.Generate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate new HPKE key: %v", err)
+	}
+
+	// Get the current key package to preserve credential and extensions
+	currentNode := pub.Nodes[toNodeIndex(index)]
+	if currentNode.Blank() || currentNode.Node.Type() != NodeTypeLeaf {
+		return nil, fmt.Errorf("no valid leaf node at index %d", index)
+	}
+
+	// Create new key package with rotated key
+	newKeyPkg := KeyPackage{
+		Version:     currentNode.Node.Leaf.Version,
+		CipherSuite: suite,
+		InitKey:     newHPKEKey.PublicKey,
+		Credential:  currentNode.Node.Leaf.Credential,
+		Extensions:  currentNode.Node.Leaf.Extensions,
+	}
+
+	// Sign the new key package
+	err = newKeyPkg.Sign(sigPriv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign new key package: %v", err)
+	}
+
+	// Update the leaf in the tree
+	pub.UpdateLeaf(index, newKeyPkg)
+
+	return &newKeyPkg, nil
+}
+
 func (pub TreeKEMPublicKey) Encap(from LeafIndex, context, leafSecret []byte, leafSigPriv SignaturePrivateKey, opts *KeyPackageOpts) (*TreeKEMPrivateKey, *DirectPath, error) {
 	// Generate path secrets
 	priv := NewTreeKEMPrivateKey(pub.Suite, pub.Size(), from, leafSecret)
@@ -684,7 +746,7 @@ func (pub TreeKEMPublicKey) Encap(from LeafIndex, context, leafSecret []byte, le
 		path.Steps[i].EncryptedPathSecrets = make([]HPKECiphertext, len(res))
 		for j, nr := range res {
 			nodePub := pub.Nodes[nr].Node.PublicKey()
-			path.Steps[i].EncryptedPathSecrets[j], err = pub.Suite.hpke().Encrypt(nodePub, context, pathSecret)
+			path.Steps[i].EncryptedPathSecrets[j], err = pub.Suite.Hpke().Encrypt(nodePub, context, pathSecret)
 			if err != nil {
 				return nil, nil, err
 			}

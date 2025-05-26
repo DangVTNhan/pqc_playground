@@ -8,9 +8,9 @@ import (
 	syntax "github.com/cisco/go-tls-syntax"
 )
 
-///
-/// KeyPackage
-///
+// /
+// / KeyPackage
+// /
 type Signature struct {
 	Data []byte `tls:"head=2"`
 }
@@ -28,6 +28,7 @@ var (
 		P256_AES128GCM_SHA256_P256,
 		X25519_CHACHA20POLY1305_SHA256_Ed25519,
 		P521_AES256GCM_SHA512_P521,
+		KYBER1024_AES256GCM_SHA512_DILITHIUM3,
 	}
 	defaultLifetime = 30 * 24 * time.Hour
 )
@@ -156,7 +157,7 @@ func (kp KeyPackage) Verify() bool {
 }
 
 func NewKeyPackageWithSecret(suite CipherSuite, initSecret []byte, cred *Credential, sigPriv SignaturePrivateKey) (*KeyPackage, error) {
-	initPriv, err := suite.hpke().Derive(initSecret)
+	initPriv, err := suite.Hpke().Derive(initSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +198,9 @@ func NewKeyPackageWithInitKey(suite CipherSuite, initKey HPKEPublicKey, cred *Cr
 	return kp, nil
 }
 
-///
-/// Proposal
-///
+// /
+// / Proposal
+// /
 type ProposalType uint8
 
 const (
@@ -299,9 +300,9 @@ func (p *Proposal) UnmarshalTLS(data []byte) (int, error) {
 	return s.Position(), nil
 }
 
-///
-/// Commit
-///
+// /
+// / Commit
+// /
 type ProposalID struct {
 	Hash []byte `tls:"head=1"`
 }
@@ -333,9 +334,9 @@ func (commit Commit) ValidForTLS() bool {
 	return commit.Path != nil || !commit.PathRequired()
 }
 
-///
-/// MLSPlaintext and MLSCiphertext
-///
+// /
+// / MLSPlaintext and MLSCiphertext
+// /
 type Epoch uint64
 
 type ContentType uint8
@@ -650,9 +651,9 @@ func (gi GroupInfo) verify() error {
 	return nil
 }
 
-///
-/// GroupSecrets
-///
+// /
+// / GroupSecrets
+// /
 type PathSecret struct {
 	Data []byte `tls:"head=1"`
 }
@@ -662,9 +663,9 @@ type GroupSecrets struct {
 	PathSecret  *PathSecret `tls:"optional"`
 }
 
-///
-/// EncryptedGroupSecrets
-///
+// /
+// / EncryptedGroupSecrets
+// /
 type EncryptedGroupSecrets struct {
 	KeyPackageHash        []byte `tls:"head=1"`
 	EncryptedGroupSecrets HPKECiphertext
@@ -744,7 +745,7 @@ func (w *Welcome) EncryptTo(kp KeyPackage, pathSecret []byte) {
 		panic(fmt.Errorf("mls.welcome: KeyPackage marshal failure %v", err))
 	}
 
-	egs, err := w.CipherSuite.hpke().Encrypt(kp.InitKey, []byte{}, pt)
+	egs, err := w.CipherSuite.Hpke().Encrypt(kp.InitKey, []byte{}, pt)
 	if err != nil {
 		panic(fmt.Errorf("mls.welcome: encrpyting KeyPackage failure %v", err))
 	}

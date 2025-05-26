@@ -126,13 +126,13 @@ type Bytes1 []byte
 
 func (b Bytes1) MarshalTLS() ([]byte, error) {
 	return syntax.Marshal(struct {
-		Data []byte `tls:"head=1"`
+		Data []byte `tls:"head=2"`
 	}{b})
 }
 
 func (b *Bytes1) UnmarshalTLS(data []byte) (int, error) {
 	tmp := struct {
-		Data []byte `tls:"head=1"`
+		Data []byte `tls:"head=2"`
 	}{}
 	read, err := syntax.Unmarshal(data, &tmp)
 	if err != nil {

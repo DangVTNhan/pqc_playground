@@ -17,6 +17,7 @@ import (
 
 	"github.com/cisco/go-hpke"
 	"github.com/cisco/go-tls-syntax"
+	"github.com/cloudflare/circl/sign/schemes"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/ed25519"
 )
@@ -30,14 +31,16 @@ const (
 	X448_AES256GCM_SHA512_Ed448            CipherSuite = 0x0004 // UNSUPPORTED
 	P521_AES256GCM_SHA512_P521             CipherSuite = 0x0005
 	X448_CHACHA20POLY1305_SHA512_Ed448     CipherSuite = 0x0006 // UNSUPPORTED
+	KYBER1024_AES256GCM_SHA512_DILITHIUM3  CipherSuite = 0x0007 // Post-Quantum
 )
 
-func (cs CipherSuite) supported() bool {
+func (cs CipherSuite) Supported() bool {
 	switch cs {
 	case X25519_AES128GCM_SHA256_Ed25519,
 		P256_AES128GCM_SHA256_P256,
 		P521_AES256GCM_SHA512_P521,
-		X25519_CHACHA20POLY1305_SHA256_Ed25519:
+		X25519_CHACHA20POLY1305_SHA256_Ed25519,
+		KYBER1024_AES256GCM_SHA512_DILITHIUM3:
 		return true
 	}
 
@@ -58,6 +61,8 @@ func (cs CipherSuite) String() string {
 		return "P521_AES256GCM_SHA512_P521"
 	case X448_CHACHA20POLY1305_SHA512_Ed448:
 		return "X448_CHACHA20POLY1305_SHA512_Ed448"
+	case KYBER1024_AES256GCM_SHA512_DILITHIUM3:
+		return "KYBER1024_AES256GCM_SHA512_DILITHIUM3"
 	}
 
 	return "UnknownCipherSuite"
@@ -110,6 +115,15 @@ func (cs CipherSuite) Constants() cipherConstants {
 			HPKEKDF:    hpke.KDF_HKDF_SHA512,
 			HPKEAEAD:   hpke.AEAD_AESGCM256,
 		}
+	case KYBER1024_AES256GCM_SHA512_DILITHIUM3:
+		return cipherConstants{
+			KeySize:    32,
+			NonceSize:  12,
+			SecretSize: 64,
+			HPKEKEM:    0x0030, // Custom KEM ID for Kyber1024 (placeholder)
+			HPKEKDF:    hpke.KDF_HKDF_SHA512,
+			HPKEAEAD:   hpke.AEAD_AESGCM256,
+		}
 	}
 
 	panic("Unsupported ciphersuite")
@@ -125,6 +139,8 @@ func (cs CipherSuite) Scheme() SignatureScheme {
 		return Ed25519
 	case P521_AES256GCM_SHA512_P521:
 		return ECDSA_SECP521R1_SHA512
+	case KYBER1024_AES256GCM_SHA512_DILITHIUM3:
+		return DILITHIUM3
 	}
 
 	panic("Unsupported ciphersuite")
@@ -140,7 +156,8 @@ func (cs CipherSuite) newDigest() hash.Hash {
 		X25519_CHACHA20POLY1305_SHA256_Ed25519:
 		return sha256.New()
 
-	case X448_AES256GCM_SHA512_Ed448, P521_AES256GCM_SHA512_P521:
+	case X448_AES256GCM_SHA512_Ed448, P521_AES256GCM_SHA512_P521,
+		KYBER1024_AES256GCM_SHA512_DILITHIUM3:
 		return sha512.New()
 	}
 
@@ -161,7 +178,8 @@ func (cs CipherSuite) NewAEAD(key []byte) (cipher.AEAD, error) {
 	switch cs {
 	case X25519_AES128GCM_SHA256_Ed25519, P256_AES128GCM_SHA256_P256:
 		fallthrough
-	case X448_AES256GCM_SHA512_Ed448, P521_AES256GCM_SHA512_P521:
+	case X448_AES256GCM_SHA512_Ed448, P521_AES256GCM_SHA512_P521,
+		KYBER1024_AES256GCM_SHA512_DILITHIUM3:
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			return nil, err
@@ -233,7 +251,16 @@ func (cs CipherSuite) deriveAppSecret(secret []byte, label string, node NodeInde
 	return cs.hkdfExpandLabel(secret, label, ctx, length)
 }
 
-func (cs CipherSuite) hpke() HPKEInstance {
+func (cs CipherSuite) Hpke() HPKEInterface {
+	// Handle post-quantum cipher suites
+	if cs == KYBER1024_AES256GCM_SHA512_DILITHIUM3 {
+		return PostQuantumHPKEInstance{
+			BaseSuite: cs,
+			PQ:        NewKyber1024HPKE(),
+		}
+	}
+
+	// Handle classical cipher suites
 	cc := cs.Constants()
 	suite, err := hpke.AssembleCipherSuite(cc.HPKEKEM, cc.HPKEKDF, cc.HPKEAEAD)
 	if err != nil {
@@ -246,6 +273,14 @@ func (cs CipherSuite) hpke() HPKEInstance {
 ///
 /// HPKE
 ///
+
+// HPKEInterface defines the common interface for both classical and post-quantum HPKE
+type HPKEInterface interface {
+	Generate() (HPKEPrivateKey, error)
+	Derive(seed []byte) (HPKEPrivateKey, error)
+	Encrypt(pub HPKEPublicKey, aad, pt []byte) (HPKECiphertext, error)
+	Decrypt(priv HPKEPrivateKey, aad []byte, ct HPKECiphertext) ([]byte, error)
+}
 
 type HPKEPrivateKey struct {
 	Data      []byte `tls:"head=2"`
@@ -372,11 +407,12 @@ const (
 	ECDSA_SECP256R1_SHA256 SignatureScheme = 0x0403
 	ECDSA_SECP521R1_SHA512 SignatureScheme = 0x0603
 	Ed25519                SignatureScheme = 0x0807
+	DILITHIUM3             SignatureScheme = 0x0A03 // Post-Quantum
 )
 
 func (ss SignatureScheme) supported() bool {
 	switch ss {
-	case ECDSA_SECP256R1_SHA256, ECDSA_SECP521R1_SHA512, Ed25519:
+	case ECDSA_SECP256R1_SHA256, ECDSA_SECP521R1_SHA512, Ed25519, DILITHIUM3:
 		return true
 	}
 
@@ -391,6 +427,8 @@ func (ss SignatureScheme) String() string {
 		return "ECDSA_SECP521R1_SHA512"
 	case Ed25519:
 		return "Ed25519"
+	case DILITHIUM3:
+		return "DILITHIUM3"
 	}
 
 	return "UnknownSignatureScheme"
@@ -435,6 +473,36 @@ func (ss SignatureScheme) Derive(preSeed []byte) (SignaturePrivateKey, error) {
 		key := SignaturePrivateKey{
 			Data:      priv,
 			PublicKey: SignaturePublicKey{pub},
+		}
+		return key, nil
+
+	case DILITHIUM3:
+		scheme := schemes.ByName("ML-DSA-87")
+		if scheme == nil {
+			return SignaturePrivateKey{}, fmt.Errorf("Dilithium3 scheme not available")
+		}
+
+		// Use the preSeed to derive a deterministic key
+		h := sha512.New()
+		h.Write(preSeed)
+		seed := h.Sum(nil)
+
+		// Dilithium key derivation from seed
+		pub, priv := scheme.DeriveKey(seed[:scheme.SeedSize()])
+
+		privBytes, err := priv.MarshalBinary()
+		if err != nil {
+			return SignaturePrivateKey{}, err
+		}
+
+		pubBytes, err := pub.MarshalBinary()
+		if err != nil {
+			return SignaturePrivateKey{}, err
+		}
+
+		key := SignaturePrivateKey{
+			Data:      privBytes,
+			PublicKey: SignaturePublicKey{pubBytes},
 		}
 		return key, nil
 	}
@@ -482,6 +550,33 @@ func (ss SignatureScheme) Generate() (SignaturePrivateKey, error) {
 			PublicKey: SignaturePublicKey{pub},
 		}
 		return key, nil
+
+	case DILITHIUM3:
+		scheme := schemes.ByName("ML-DSA-87")
+		if scheme == nil {
+			return SignaturePrivateKey{}, fmt.Errorf("Dilithium3 scheme not available")
+		}
+
+		pub, priv, err := scheme.GenerateKey()
+		if err != nil {
+			return SignaturePrivateKey{}, err
+		}
+
+		privBytes, err := priv.MarshalBinary()
+		if err != nil {
+			return SignaturePrivateKey{}, err
+		}
+
+		pubBytes, err := pub.MarshalBinary()
+		if err != nil {
+			return SignaturePrivateKey{}, err
+		}
+
+		key := SignaturePrivateKey{
+			Data:      privBytes,
+			PublicKey: SignaturePublicKey{pubBytes},
+		}
+		return key, nil
 	}
 	panic("Unsupported algorithm")
 }
@@ -521,6 +616,22 @@ func (ss SignatureScheme) Sign(priv *SignaturePrivateKey, message []byte) ([]byt
 	case Ed25519:
 		priv25519 := ed25519.PrivateKey(priv.Data)
 		return ed25519.Sign(priv25519, message), nil
+
+	case DILITHIUM3:
+		scheme := schemes.ByName("ML-DSA-87")
+		if scheme == nil {
+			return nil, fmt.Errorf("Dilithium3 scheme not available")
+		}
+
+		// Unmarshal the private key
+		privKey, err := scheme.UnmarshalBinaryPrivateKey(priv.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal Dilithium private key: %v", err)
+		}
+
+		// Sign the message directly (Dilithium handles its own hashing)
+		signature := scheme.Sign(privKey, message, nil)
+		return signature, nil
 	}
 	panic("Unsupported algorithm")
 }
@@ -564,6 +675,21 @@ func (ss SignatureScheme) Verify(pub *SignaturePublicKey, message, signature []b
 	case Ed25519:
 		pub25519 := ed25519.PublicKey(pub.Data)
 		return ed25519.Verify(pub25519, message, signature)
+
+	case DILITHIUM3:
+		scheme := schemes.ByName("ML-DSA-87")
+		if scheme == nil {
+			return false
+		}
+
+		// Unmarshal the public key
+		pubKey, err := scheme.UnmarshalBinaryPublicKey(pub.Data)
+		if err != nil {
+			return false
+		}
+
+		// Verify the signature
+		return scheme.Verify(pubKey, message, signature, nil)
 	}
 	panic("Unsupported algorithm")
 }

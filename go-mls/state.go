@@ -9,9 +9,9 @@ import (
 	"github.com/cisco/go-tls-syntax"
 )
 
-///
-/// GroupContext
-///
+// /
+// / GroupContext
+// /
 type GroupContext struct {
 	GroupID                 []byte `tls:"head=1"`
 	Epoch                   Epoch
@@ -156,7 +156,7 @@ func NewJoinedState(initSecret []byte, sigPrivs []SignaturePrivateKey, kps []Key
 		for _, egs := range welcome.Secrets {
 			found = bytes.Equal(kphash, egs.KeyPackageHash)
 			if found {
-				initPriv, err = kp.CipherSuite.hpke().Derive(initSecret)
+				initPriv, err = kp.CipherSuite.Hpke().Derive(initSecret)
 				if err != nil {
 					return nil, err
 				}
@@ -184,7 +184,7 @@ func NewJoinedState(initSecret []byte, sigPrivs []SignaturePrivateKey, kps []Key
 		return nil, fmt.Errorf("mls.state: ciphersuite mismatch")
 	}
 
-	pt, err := suite.hpke().Decrypt(initPriv, []byte{}, encGroupSecrets.EncryptedGroupSecrets)
+	pt, err := suite.Hpke().Decrypt(initPriv, []byte{}, encGroupSecrets.EncryptedGroupSecrets)
 	if err != nil {
 		return nil, fmt.Errorf("mls.state: encKeyPkg decryption failure %v", err)
 	}
